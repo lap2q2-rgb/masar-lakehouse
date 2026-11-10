@@ -19,3 +19,5 @@ logs/
 # Trainer-only files (never pushed)
 TRAINER_NOTES.md
 dbt/masar/.user.yml
+dbt/masar/.user.yml
+dbt/masar/.user.yml
