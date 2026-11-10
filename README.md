@@ -1,62 +1,129 @@
-# Masar Lakehouse: SDA-DSC-214 workshop starter
+# Masar Mini-Lakehouse
 
-Modern Data Engineering for AI Systems, 3 days x 4 hours. You build a small but complete
-Lakehouse for **Masar**, a (fictional) Saudi ride-hailing platform: bronze, silver and gold
-Delta tables, a dbt silver model, Kafka streaming, quality gates and serving for AI and BI.
+A small lakehouse built as the project of the course **SDA-DSC-214: Modern Data Engineering for AI Systems** at SDAIA Academy.
 
-This repo is the **starting point (before Day 1)**. Fork it, clone your fork, and follow your trainer.
+- Author: `<your name>`  
+- Date: `<date>`  
+- Official SDAIA Academy GitHub: [github.com/SDAIAAcademy](https://github.com/SDAIAAcademy)  
+- Course starting repository: [altherwy/masar-lakehouse](https://github.com/altherwy/masar-lakehouse)
 
-## Quick start
+## What this project is
 
-Requirements: Python 3.10-3.12, Java 17, git. Docker is needed from Day 2.
+Masar is a made-up ride-hailing company in Saudi Arabia. The data is synthetic: trips, drivers and GPS pings for five cities. This project turns that raw data into trusted tables that serve both dashboards (BI) and machine learning (AI), following the lakehouse pattern: open file formats, a transaction log for reliability, and three layers of increasing quality.
 
-```bash
-git clone <your-fork-url> masar-lakehouse && cd masar-lakehouse
-make setup                      # creates .venv and installs pinned packages
-source .venv/bin/activate
-make doctor                     # every line should show a tick
-make data                       # generates the dataset into data/raw and data/fixtures
-```
-
-`make doctor` must be all ticks before Day 1. The first Spark run downloads the Delta
-(and later Kafka) jars once, so you need internet access for it.
-
-## What is here
+## Architecture
 
 ```
-Makefile                 make doctor | data | register | kafka-up | pipeline | clean-lakehouse
-scripts/make_data.py     seeded data generator: same seed, same data for everyone
-scripts/doctor.py        checks your toolchain
-src/masar/spark.py       get_spark(): Spark + Delta (and Kafka) session, ready to use
-src/masar/config.py      shared paths and constants
-src/masar/register.py    registers bronze tables so dbt can read them
-src/masar/<package>/     empty packages you fill in during the tutorials
-dbt/masar/               dbt project shell (profile, packages); you write the models
-docker-compose.yml       single-broker Kafka for Day 2
-tests/                   tests for the data generator
+ CSV / JSON files ----\
+                       +--> BRONZE (raw, kept as it arrived, Delta)
+ Kafka GPS stream ----/            |
+                                   v
+                     dbt model + checks --> SILVER (clean, enforced, Delta)
+                                   |
+                  quality contract --+--> GOLD (marts and features)
+                                                |
+                                +---------------+---------------+
+                                v                               v
+                       BI-safe table                     Training set
+                  (pseudonymised, no raw ids)         (point-in-time features)
 ```
 
-Generated data (git-ignored):
+## What I built
 
-| File | What |
-|---|---|
-| `data/raw/trips_2026-06-01.csv` | 48,200 trips, 12 columns |
-| `data/raw/drivers.csv` | 1,850 drivers |
-| `data/raw/gps/sample.ndjson` | 120,000 GPS pings, in arrival order (a few arrive late) |
-| `data/fixtures/` | dirty batches, a late trip, fare corrections, an erasure request |
+| Day | Topic | What is in the repository |
+| :---- | :---- | :---- |
+| 1 | Bronze and silver | Landing scripts, profiling, dbt staging and silver models |
+| 2 | Reliable tables and streaming | Delta constraints, schema evolution, MERGE, time travel, OPTIMIZE and VACUUM, Kafka to Delta streaming |
+| 3 | Trust and serving | Data contract, quality gate, observability, PII retention, gold marts, one-command pipeline, training set, BI-safe table |
 
-## Rules of the workshop
+## Technology
 
-- Tutorials **add** files; run commands from the repo root unless a slide says otherwise.
-- If you fall behind, ask for the next `tutorial-N-start` branch.
-- Everything you build lives under `lakehouse/`. Start over any time with `make clean-lakehouse`.
-- Do not commit `lakehouse/` or generated data (already git-ignored).
+- Python 3.11 and Java 17  
+- Apache Spark 3.5.1 and Delta Lake 3.2.0  
+- dbt 1.8 with the Spark adapter  
+- Apache Kafka 3.7.0 (single broker, run with Docker)  
+- Great Expectations 0.18.19  
+- GitHub Codespaces as the development environment
 
-## Troubleshooting
+## Project structure
 
-| Symptom | Fix |
-|---|---|
-| `make doctor` shows a cross for Java | Install Java 17 and make sure `java -version` prints 17 |
-| First `get_spark()` is slow or fails | It downloads jars from Maven Central; check your network or proxy |
-| `ModuleNotFoundError: masar` | Run commands through `make` or set `PYTHONPATH=src` |
-| Port 9092 already in use | Stop the other Kafka, or `make kafka-down` |
+```
+src/masar/
+  ingest/       landing raw files into bronze
+  delta/        constraints, MERGE, time travel, small files
+  stream/       Kafka producer and streaming ingest
+  quality/      data contract, gate, observability, PII retention
+  transform/    gold tables
+  serve/        training set and BI-safe table
+  pipeline.py   the one-command pipeline
+dbt/masar/      dbt staging and silver models and tests
+Makefile        shortcuts such as make data and make pipeline
+```
+
+## How to run it
+
+The data is not stored in this repository. You generate it with the steps below.
+
+1. Open the repository in a GitHub Codespace (Code button, then Codespaces, then Create). Wait until the setup finishes.  
+2. Check the environment:
+
+```sh
+make doctor
+```
+
+3. Generate the dataset:
+
+```sh
+make data
+```
+
+4. Land the raw files into bronze (run this once only):
+
+```sh
+python -m masar.ingest.land_bronze
+```
+
+5. Register the bronze tables and install dbt packages:
+
+```sh
+make register
+make dbt-deps
+```
+
+6. Build and test the silver table, then add the Delta constraints:
+
+```sh
+cd dbt/masar && dbt run && dbt test && cd ../..
+python -m masar.delta.enforce_silver
+```
+
+7. Run the whole pipeline (silver, quality check, gold, maintenance):
+
+```sh
+make pipeline
+```
+
+8. Serve the two consumers:
+
+```sh
+python -m masar.serve.training_join
+python -m masar.serve.bi_view
+```
+
+Only one Spark session can run at a time, so wait for each command to finish before starting the next.
+
+## Results
+
+- Silver: about 44,371 trips (44,364 if you also ran the Day 2 erase of one rider)  
+- Data contract on silver: 7 of 7 rules pass  
+- Gold demand table: 120 rows (5 cities x 24 hours); gold features: one row per trip  
+- Pipeline: runs twice with identical counts, and recovers after an injected failure  
+- BI table: no raw rider or driver ids; the same number of pseudonyms as riders
+
+## Limits of this project
+
+This is a teaching lakehouse on one machine with synthetic data. It is not production-ready: it has no real catalog or access control, no scheduler or alerting, and the streaming part is not connected to the main pipeline.
+
+## Acknowledgements
+
+Built during SDA-DSC-214 at [SDAIA Academy](https://github.com/SDAIAAcademy), starting from the course repository above.
